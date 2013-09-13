@@ -25,7 +25,7 @@
 #
 #******************************************************************************
 
-
+import os
 import locale
 import math
 import operator
@@ -106,43 +106,56 @@ class QTilesDialog(QDialog, Ui_Dialog):
         self.chkWriteMapurl.setChecked(self.settings.value("write_mapurl", False, type=bool))
         self.chkWriteViewer.setChecked(self.settings.value("write_viewer", False, type=bool))
 
+
     def reject(self):
         QDialog.reject(self)
+
 
     def accept(self):
         if self.rbOutputZip.isChecked():
             output = self.leZipFileName.text()
-        else:
+        elif self.rbOutputDir.isChecked():
             output = self.leDirectoryName.text()
+        else:
+            output = self.leMbtilesPath.text()
 
         if not output:
-            QMessageBox.warning(self,
-                                self.tr("No output"),
-                                self.tr("Output path is not set. Please enter correct path and try again.")
-                               )
+            QMessageBox.warning(
+                self,
+                self.tr("No output"),
+                self.tr(
+                    "Output path is not set. Please enter correct path "
+                    "and try again.")
+            )
             return
 
         fileInfo = QFileInfo(output)
-        if fileInfo.isDir() and not len(QDir(output).entryList(QDir.Dirs | QDir.Files | QDir.NoDotAndDotDot)) == 0:
-            res = QMessageBox.warning(self,
-                                      self.tr("Directory not empty"),
-                                      self.tr("Selected directory is not empty. Continue?"),
-                                      QMessageBox.Yes | QMessageBox.No
-                                    )
+        if fileInfo.isDir() and not len(QDir(output).entryList(
+                QDir.Dirs | QDir.Files | QDir.NoDotAndDotDot)) == 0:
+            res = QMessageBox.warning(
+                self,
+                self.tr("Directory not empty"),
+                self.tr("Selected directory is not empty. Continue?"),
+                QMessageBox.Yes | QMessageBox.No
+            )
             if res == QMessageBox.No:
                 return
 
         if self.spnZoomMin.value() > self.spnZoomMax.value():
-            QMessageBox.warning(self,
-                                self.tr("Wrong zoom"),
-                                self.tr("Maximum zoom value is lower than minimum. Please correct this and try again.")
-                               )
+            QMessageBox.warning(
+                self,
+                self.tr("Wrong zoom"),
+                self.tr(
+                    "Maximum zoom value is lower than minimum. "
+                    "Please correct this and try again.")
+            )
             return
 
         self.settings.setValue("rootDir", self.leRootDir.text())
 
         self.settings.setValue("outputToZip", self.rbOutputZip.isChecked())
         self.settings.setValue("outputToDir", self.rbOutputDir.isChecked())
+        self.settings.setValue("outputToMbtiles", self.rbMabox.isChecked())
 
         self.settings.setValue("extentCanvas", self.rbExtentCanvas.isChecked())
         self.settings.setValue("extentFull", self.rbExtentFull.isChecked())
@@ -171,11 +184,13 @@ class QTilesDialog(QDialog, Ui_Dialog):
             layer = utils.getLayerById(self.cmbLayers.itemData(self.cmbLayers.currentIndex()))
             extent = canvas.mapRenderer().layerExtentToOutputExtent(layer, layer.extent())
 
-        extent = QgsCoordinateTransform(canvas.mapRenderer().destinationCrs(),
-                                        QgsCoordinateReferenceSystem("EPSG:4326")).transform(extent)
+        extent = QgsCoordinateTransform(
+            canvas.mapRenderer().destinationCrs(),
+            QgsCoordinateReferenceSystem("EPSG:4326")).transform(extent)
 
         arctanSinhPi = math.degrees(math.atan(math.sinh(math.pi)))
-        extent = extent.intersect(QgsRectangle(-180, -arctanSinhPi, 180, arctanSinhPi))
+        extent = extent.intersect(
+            QgsRectangle(-180, -arctanSinhPi, 180, arctanSinhPi))
 
         layers = []
         for layer in canvas.layers():
@@ -184,19 +199,20 @@ class QTilesDialog(QDialog, Ui_Dialog):
         writeMapurl = self.chkWriteMapurl.isEnabled() and self.chkWriteMapurl.isChecked()
         writeViewer = self.chkWriteViewer.isEnabled() and self.chkWriteViewer.isChecked()
 
-        self.workThread = tilingthread.TilingThread(layers,
-                                                    extent,
-                                                    self.spnZoomMin.value(),
-                                                    self.spnZoomMax.value(),
-                                                    self.spnTileWidth.value(),
-                                                    self.spnTileHeight.value(),
-                                                    fileInfo,
-                                                    self.leRootDir.text(),
-                                                    self.chkAntialiasing.isChecked(),
-                                                    self.chkTMSConvention.isChecked(),
-                                                    writeMapurl,
-                                                    writeViewer
-                                                   )
+        self.workThread = tilingthread.TilingThread(
+            layers,
+            extent,
+            self.spnZoomMin.value(),
+            self.spnZoomMax.value(),
+            self.spnTileWidth.value(),
+            self.spnTileHeight.value(),
+            fileInfo,
+            self.leRootDir.text(),
+            self.chkAntialiasing.isChecked(),
+            self.chkTMSConvention.isChecked(),
+            writeMapurl,
+            writeViewer
+        )
         self.workThread.rangeChanged.connect(self.setProgressRange)
         self.workThread.updateProgress.connect(self.updateProgress)
         self.workThread.processFinished.connect(self.processFinished)
@@ -222,6 +238,8 @@ class QTilesDialog(QDialog, Ui_Dialog):
     def processFinished(self):
         self.stopProcessing()
         self.restoreGui()
+
+
 
     def stopProcessing(self):
         if self.workThread is not None:
@@ -265,11 +283,12 @@ class QTilesDialog(QDialog, Ui_Dialog):
         lastDirectory = self.settings.value("lastUsedDir", ".")
 
         if self.rbOutputZip.isChecked():
-            outPath = QFileDialog.getSaveFileName(self,
-                                                  self.tr("Save to file"),
-                                                  lastDirectory,
-                                                  self.tr("ZIP archives (*.zip *.ZIP)")
-                                                 )
+            outPath = QFileDialog.getSaveFileName(
+                self,
+                self.tr("Save to file"),
+                lastDirectory,
+                self.tr("ZIP archives (*.zip *.ZIP)")
+            )
             if not outPath:
                 return
 
@@ -277,15 +296,29 @@ class QTilesDialog(QDialog, Ui_Dialog):
                 outPath += ".zip"
 
             self.leZipFileName.setText(outPath)
-        else:
-            outPath = QFileDialog.getExistingDirectory(self,
-                                                       self.tr("Save to directory"),
-                                                       lastDirectory,
-                                                       QFileDialog.ShowDirsOnly
-                                                      )
+        elif self.rbOutputDir.isChecked():
+            outPath = QFileDialog.getExistingDirectory(
+                self,
+                self.tr("Save to directory"),
+                lastDirectory,
+                QFileDialog.ShowDirsOnly
+            )
             if not outPath:
                 return
 
             self.leDirectoryName.setText(outPath)
 
-        self.settings.setValue("lastUsedDir", QFileInfo(outPath).absoluteDir().absolutePath())
+        else:
+            outPath = QFileDialog.getSaveFileName(
+                self,
+                self.tr("Save to file"),
+                lastDirectory,
+                self.tr("MabBox Tile Store (*.mbtiles)")
+            )
+            if not outPath:
+                return
+
+            self.leMbtilesPath.setText(outPath)
+
+        self.settings.setValue(
+            "lastUsedDir", QFileInfo(outPath).absoluteDir().absolutePath())

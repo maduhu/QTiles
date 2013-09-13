@@ -25,7 +25,7 @@
 #
 #******************************************************************************
 
-
+import os
 import math
 import time
 import zipfile
@@ -38,10 +38,19 @@ from qgis.core import *
 
 from tile import Tile
 
-import resources_rc
+from mbutils import (
+    optimize_connection,
+    mbtiles_setup,
+    json,
+    mbtiles_connect,
+    optimize_database)
+import sqlite3
 
+import resources_rc
+from pydev.pydevd import settrace
 
 class TilingThread(QThread):
+
     rangeChanged = pyqtSignal(str, int)
     updateProgress = pyqtSignal()
     processFinished = pyqtSignal()
@@ -83,9 +92,10 @@ class TilingThread(QThread):
 
         self.image = QImage(width, height, QImage.Format_ARGB32_Premultiplied)
 
-        self.projector = QgsCoordinateTransform(QgsCoordinateReferenceSystem("EPSG:4326"),
-                                                QgsCoordinateReferenceSystem("EPSG:3395")
-                                               )
+        self.projector = QgsCoordinateTransform(
+            QgsCoordinateReferenceSystem("EPSG:4326"),
+            QgsCoordinateReferenceSystem("EPSG:3395")
+        )
 
         self.scaleCalc = QgsScaleCalculator()
         self.scaleCalc.setDpi(self.image.logicalDpiX())
@@ -98,27 +108,63 @@ class TilingThread(QThread):
         self.renderer.setProjectionsEnabled(True)
         self.renderer.setLabelingEngine(self.labeling)
         self.renderer.setLayerSet(self.layers)
+        self.con = None  # for mbtiles
+        self.cur = None  # for mbtiles
+
+    def mode(self):
+        """Find out if we are creating tiledir, zip or mbtiles."""
+        if self.output.isDir():
+            return "TILE_DIR"
+        file_extension = os.path.splitext(str(self.output))
+        if file_extension == ".ZIP":
+            return "ZIP"
+        else:
+            return "MBTILES"
+
+    def setup_mbtiles(self):
+        self.con = mbtiles_connect(str(self.output))
+        directory_path = os.path.dirname(str(self.output))
+        self.cur = self.con.cursor()
+        optimize_connection(self.cur)
+        mbtiles_setup(self.cur)
+        self.image_format = 'png'
+        try:
+            metadata = json.load(
+                open(os.path.join(directory_path, 'metadata.json'), 'r'))
+            for name, value in metadata.items():
+                self.cur.execute(
+                    'insert into metadata (name, value) values (?, ?)',
+                    (name, value))
+                #logger.info('metadata from metadata.json restored')
+        except IOError:
+            #logger.warning('metadata.json not found')
+            pass
 
     def run(self):
+        settrace('localhost', port=6789, stdoutToServer=True,
+            stderrToServer=True)
         self.mutex.lock()
         self.stopMe = 0
         self.mutex.unlock()
-
+        mode = self.mode()
+        self.zip = None
         # prepare output
-        if self.output.isDir():
-            self.zip = None
+        if mode == "TILE_DIR":
             self.tmp = None
             if self.mapurl:
                 self.writeMapurlFile()
 
             if self.viewer:
                 self.writeLeafletViewer()
-        else:
-            self.zip = zipfile.ZipFile(unicode(self.output.absoluteFilePath()), "w")
+        elif mode == "ZIP":
+            self.zip = zipfile.ZipFile(
+                unicode(self.output.absoluteFilePath()), "w")
             self.tmp = QTemporaryFile()
             self.tmp.setAutoRemove(False)
             self.tmp.open(QIODevice.WriteOnly)
             self.tempFileName = self.tmp.fileName()
+        else:  # mode == "MBTILES":
+            self.setup_mbtiles()
 
         self.rangeChanged.emit(self.tr("Searching tiles..."), 0)
 
@@ -132,13 +178,15 @@ class TilingThread(QThread):
             #del self.tiles[:]
             #self.tiles = None
 
-            if self.zip is not None:
+            if self.zip is not None and mode == "ZIP":
                 self.zip.close()
                 self.zip = None
 
                 self.tmp.close()
                 self.tmp.remove()
                 self.tmp = None
+            if self.con is not None and mode == "MBTILES":
+                optimize_database(self.con)
 
             self.processInterrupted.emit()
 
@@ -160,9 +208,12 @@ class TilingThread(QThread):
                 self.interrupted = True
                 break
 
-        if self.zip is not None:
+        if self.zip is not None and mode == "ZIP":
             self.zip.close()
             self.zip = None
+
+        if self.con is not None and mode == "MBTILES":
+            optimize_database(self.con)
 
         if not self.interrupted:
             self.processFinished.emit()
@@ -170,6 +221,10 @@ class TilingThread(QThread):
             self.processInterrupted.emit()
 
     def stop(self):
+        """Runs when the process completes."""
+
+
+        self.cur = None
         self.mutex.lock()
         self.stopMe = 1
         self.mutex.unlock()
@@ -238,17 +293,27 @@ class TilingThread(QThread):
 
         # save image
         path = "%s/%s/%s" % (self.rootDir, tile.z, tile.x)
-        if self.output.isDir():
+        if self.mode() == "TILE_DIR":
             dirPath = "%s/%s" % (self.output.absoluteFilePath(), path)
             QDir().mkpath(dirPath)
             self.image.save("%s/%s.png" % (dirPath, tile.y), "PNG")
-        else:
+        elif self.mode() == "ZIP":
             self.image.save(self.tempFileName, "PNG")
             self.tmp.close()
 
             tilePath = "%s/%s.png" % (path, tile.y)
-            self.zip.write(unicode(self.tempFileName), unicode(tilePath).encode("utf8"))
+            self.zip.write(unicode(
+                self.tempFileName), unicode(tilePath).encode("utf8"))
+        else:  # MBTILES
+            byte_array = QByteArray()
+            buffer = QBuffer(byte_array)
+            self.image.save(buffer, "PNG")
 
+            self.cur.execute("""insert into tiles (zoom_level,
+                tile_column, tile_row, tile_data) values
+                (?, ?, ?, ?);""", (
+                    tile.z, tile.x, tile.y, sqlite3.Binary(buffer.data())))
+            buffer.close()
 
 class MyTemplate(Template):
     delimiter = "@"
