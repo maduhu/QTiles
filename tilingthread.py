@@ -122,12 +122,12 @@ class TilingThread(QThread):
             return "MBTILES"
 
     def setup_mbtiles(self):
-        self.con = mbtiles_connect(str(self.output))
+        path = str(self.output.absoluteFilePath())
+        self.con = mbtiles_connect(path)
         directory_path = os.path.dirname(str(self.output))
         self.cur = self.con.cursor()
         optimize_connection(self.cur)
         mbtiles_setup(self.cur)
-        self.image_format = 'png'
         try:
             metadata = json.load(
                 open(os.path.join(directory_path, 'metadata.json'), 'r'))
@@ -309,10 +309,13 @@ class TilingThread(QThread):
             buffer = QBuffer(byte_array)
             self.image.save(buffer, "PNG")
 
-            self.cur.execute("""insert into tiles (zoom_level,
-                tile_column, tile_row, tile_data) values
-                (?, ?, ?, ?);""", (
-                    tile.z, tile.x, tile.y, sqlite3.Binary(buffer.data())))
+            try:
+                self.cur.execute("""insert into tiles (zoom_level,
+                    tile_column, tile_row, tile_data) values
+                    (?, ?, ?, ?);""", (
+                        tile.z, tile.x, tile.y, sqlite3.Binary(buffer.data())))
+            except Exception, e:
+                print e.message
             buffer.close()
 
 class MyTemplate(Template):
