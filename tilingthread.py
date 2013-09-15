@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-
+"""Tiling module that actually renders the tiles."""
 #******************************************************************************
 #
 # QTiles
@@ -26,7 +26,6 @@
 #******************************************************************************
 
 import os
-import math
 import time
 import zipfile
 from string import Template
@@ -49,8 +48,9 @@ import sqlite3
 import resources_rc
 from pydev.pydevd import settrace
 
-class TilingThread(QThread):
 
+class TilingThread(QThread):
+    """Threaded tiler implementation."""
     rangeChanged = pyqtSignal(str, int)
     updateProgress = pyqtSignal()
     processFinished = pyqtSignal()
@@ -70,7 +70,11 @@ class TilingThread(QThread):
         self.maxZoom = maxZoom
         self.output = outputPath
         self.width = width
-        self.rootDir = rootDir if rootDir else "tileset_%s" % unicode(time.time()).split(".")[0]
+        if rootDir:
+            self.rootDir = rootDir
+        else:
+            "tileset_%s" % unicode(
+                time.time()).split(".")[0]
 
         self.antialias = antialiasing
         self.tmsConvention = tmsConvention
@@ -81,9 +85,12 @@ class TilingThread(QThread):
         self.interrupted = False
         self.tiles = []
 
-        myRed = QgsProject.instance().readNumEntry("Gui", "/CanvasColorRedPart", 255)[0]
-        myGreen = QgsProject.instance().readNumEntry("Gui", "/CanvasColorGreenPart", 255)[0]
-        myBlue = QgsProject.instance().readNumEntry("Gui", "/CanvasColorBluePart", 255)[0]
+        myRed = QgsProject.instance().readNumEntry(
+            "Gui", "/CanvasColorRedPart", 255)[0]
+        myGreen = QgsProject.instance().readNumEntry(
+            "Gui", "/CanvasColorGreenPart", 255)[0]
+        myBlue = QgsProject.instance().readNumEntry(
+            "Gui", "/CanvasColorBluePart", 255)[0]
 
         if int(QT_VERSION_STR[2]) >= 8:
             self.color = QColor(myRed, myGreen, myBlue)
@@ -99,12 +106,15 @@ class TilingThread(QThread):
 
         self.scaleCalc = QgsScaleCalculator()
         self.scaleCalc.setDpi(self.image.logicalDpiX())
-        self.scaleCalc.setMapUnits(QgsCoordinateReferenceSystem("EPSG:3395").mapUnits())
+        self.scaleCalc.setMapUnits(
+            QgsCoordinateReferenceSystem("EPSG:3395").mapUnits())
 
         self.labeling = QgsPalLabeling()
         self.renderer = QgsMapRenderer()
-        self.renderer.setOutputSize(self.image.size(), self.image.logicalDpiX())
-        self.renderer.setDestinationCrs(QgsCoordinateReferenceSystem("EPSG:3395"))
+        self.renderer.setOutputSize(
+            self.image.size(), self.image.logicalDpiX())
+        self.renderer.setDestinationCrs(
+            QgsCoordinateReferenceSystem("EPSG:3395"))
         self.renderer.setProjectionsEnabled(True)
         self.renderer.setLabelingEngine(self.labeling)
         self.renderer.setLayerSet(self.layers)
@@ -122,6 +132,7 @@ class TilingThread(QThread):
             return "MBTILES"
 
     def setup_mbtiles(self):
+        """Prepare for rendering to mbtiles."""
         path = str(self.output.absoluteFilePath())
         self.con = mbtiles_connect(path)
         directory_path = os.path.dirname(str(self.output))
@@ -141,6 +152,7 @@ class TilingThread(QThread):
             pass
 
     def run(self):
+        """Thread start implementation."""
         settrace('localhost', port=6789, stdoutToServer=True,
             stderrToServer=True)
         self.mutex.lock()
@@ -222,8 +234,6 @@ class TilingThread(QThread):
 
     def stop(self):
         """Runs when the process completes."""
-
-
         self.cur = None
         self.mutex.lock()
         self.stopMe = 1
@@ -232,37 +242,45 @@ class TilingThread(QThread):
         QThread.wait(self)
 
     def writeMapurlFile(self):
-        filePath = "%s/%s.mapurl" % (self.output.absoluteFilePath(), self.rootDir)
+        """Write the map url file."""
+        filePath = "%s/%s.mapurl" % (
+            self.output.absoluteFilePath(), self.rootDir)
         tileServer = "tms" if self.tmsConvention else "google"
         with open(filePath, "w") as mapurl:
             mapurl.write("%s=%s\n" % ("url", self.rootDir + "/ZZZ/XXX/YYY.png"))
             mapurl.write("%s=%s\n" % ("minzoom", self.minZoom))
             mapurl.write("%s=%s\n" % ("maxzoom", self.maxZoom))
-            mapurl.write("%s=%f %f\n" % ("center", self.extent.center().x(), self.extent.center().y()))
+            mapurl.write("%s=%f %f\n" % ("center", self.extent.center().x(),
+                                         self.extent.center().y()))
             mapurl.write("%s=%s\n" % ("type", tileServer))
 
     def writeLeafletViewer(self):
+        """Create the leaflet viewer."""
         templateFile = QFile(":/resources/viewer.html")
         if templateFile.open(QIODevice.ReadOnly | QIODevice.Text):
             viewer = MyTemplate(unicode(templateFile.readAll()))
             tilesDir = "%s/%s" % (self.output.absoluteFilePath(), self.rootDir)
             useTMS = "true" if self.tmsConvention else "false"
-            substitutions = {"tilesdir"    : tilesDir,
-                             "tilesetname" : self.rootDir,
-                             "tms"         : useTMS,
-                             "centerx"     : self.extent.center().x(),
-                             "centery"     : self.extent.center().y(),
-                             "avgzoom"     : (self.maxZoom + self.minZoom) / 2,
-                             "maxzoom"     : self.maxZoom
-                            }
+            substitutions = {"tilesdir": tilesDir,
+                             "tilesetname": self.rootDir,
+                             "tms": useTMS,
+                             "centerx": self.extent.center().x(),
+                             "centery": self.extent.center().y(),
+                             "avgzoom": (self.maxZoom + self.minZoom) / 2,
+                             "maxzoom": self.maxZoom}
 
-            filePath = "%s/%s.html" % (self.output.absoluteFilePath(), self.rootDir)
+            filePath = "%s/%s.html" % (
+                self.output.absoluteFilePath(), self.rootDir)
             with open(filePath, "w") as fOut:
                 fOut.write(viewer.substitute(substitutions))
 
             templateFile.close()
 
     def countTiles(self, tile):
+        """Count how many tiles have been created geven a tile.
+
+        :param tile: A tile object.
+        """
         if self.interrupted or not self.extent.intersects(tile.toRectangle()):
             return
 
@@ -283,6 +301,10 @@ class TilingThread(QThread):
                     self.countTiles(subTile)
 
     def render(self, tile):
+        """Render a tile to an image.
+
+        :param tile: A valid tile instance.
+        """
         self.renderer.setExtent(self.projector.transform(tile.toRectangle()))
         scale = self.scaleCalc.calculate(self.renderer.extent(), self.width)
         self.renderer.setScale(scale)
@@ -313,13 +335,16 @@ class TilingThread(QThread):
                 self.cur.execute("""insert into tiles (zoom_level,
                     tile_column, tile_row, tile_data) values
                     (?, ?, ?, ?);""", (
-                        tile.z, tile.x, tile.y, sqlite3.Binary(buffer.data())))
+                    tile.z, tile.x, tile.y, sqlite3.Binary(buffer.data())))
             except Exception, e:
                 print e.message
             buffer.close()
 
+
 class MyTemplate(Template):
+    """Template class."""
     delimiter = "@"
 
     def __init__(self, templateString):
+        """Constructor."""
         Template.__init__(self, templateString)
